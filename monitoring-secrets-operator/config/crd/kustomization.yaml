@@ -1,0 +1,10 @@
+resources:
+  - bases/core.mycompany.com_secrets.yaml  # CRD definition
+
+# Webhook patches
+patches:
+  # Uncomment if you're enabling webhooks
+  # +kubebuilder:scaffold:crdkustomizewebhookpatch
+
+configurations:
+  - kustomizeconfig.yaml

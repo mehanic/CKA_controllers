@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-app-secret
+  namespace: default
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: monitoring-secrets-operator  # Same labels to match ServiceMonitor
+type: Opaque
+data:
+  password: eW91ci1wYXNzd29yZA==
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-deployment
+  namespace: default
+  labels:
+    control-plane: controller-manager  # Add matching labels here
+    app.kubernetes.io/name: monitoring-secrets-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+        control-plane: controller-manager  # Add matching labels here
+        app.kubernetes.io/name: monitoring-secrets-operator
+    spec:
+      containers:
+        - name: my-app-container
+          image: localhost:5000/my-image:v3
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: secret-volume
+              mountPath: /etc/secret-volume
+              readOnly: true
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: my-app-secret
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+  namespace: default
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: monitoring-secrets-operator  # Match these labels to the ServiceMonitor selector
+spec:
+  selector:
+    app: my-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+      nodePort: 30080  # This will expose the service on port 30080 on your node
+  type: NodePort
+
+#echo -n 'your-password' | base64
+#kubectl get secret my-app-secret -o jsonpath='{.data.password}' | base64 --decode
+

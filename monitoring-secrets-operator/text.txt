@@ -1,0 +1,673 @@
+Steps to Create a Kubebuilder Project for Secret Monitoring
+1. Install Prerequisites
+Before you start, ensure you have the required tools installed:
+
+Kubebuilder
+
+sh
+Copy
+Edit
+curl -L -o kubebuilder https://go.kubebuilder.io/dl/latest/linux/amd64
+chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+(For macOS, replace linux with darwin.)
+
+Go (v1.19 or later)
+
+sh
+Copy
+Edit
+sudo apt install golang  # Ubuntu
+brew install go          # macOS
+Kubernetes CLI (kubectl)
+
+sh
+Copy
+Edit
+sudo apt install kubectl  # Ubuntu
+brew install kubectl      # macOS
+Kind (for local cluster)
+
+sh
+Copy
+Edit
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+chmod +x kind && sudo mv kind /usr/local/bin/
+2. Initialize the Kubebuilder Project
+Create a new Kubebuilder project named "monitoring-secrets-operator":
+
+sh
+Copy
+Edit
+mkdir monitoring-secrets-operator && cd monitoring-secrets-operator
+kubebuilder init --domain mycompany.com --repo mycompany.com/monitoring-secrets-operator
+✅ This generates:
+
+main.go → Entry point of the operator
+config/ → Kubernetes manifests
+controllers/ → Business logic (custom controller)
+api/ → Custom Resource Definition (CRD)
+3. Create a Custom Resource Definition (CRD)
+You need a CRD to define how you will configure secret monitoring.
+
+sh
+Copy
+Edit
+kubebuilder create api --group security --version v1alpha1 --kind SecretMonitor
+✅ This generates:
+
+api/v1alpha1/secretmonitor_types.go (CRD Schema)
+controllers/secretmonitor_controller.go (Controller logic)
+4. Define the CRD Schema (secretmonitor_types.go)
+Modify api/v1alpha1/secretmonitor_types.go to define the SecretMonitor CRD.
+
+go
+Copy
+Edit
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// SecretMonitorSpec defines the desired state of SecretMonitor
+type SecretMonitorSpec struct {
+	Namespace string `json:"namespace"`
+}
+
+// SecretMonitorStatus defines the observed state of SecretMonitor
+type SecretMonitorStatus struct {
+	TotalSecrets int `json:"totalSecrets"`
+}
+
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
+
+// SecretMonitor monitors and removes sensitive secrets
+type SecretMonitor struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   SecretMonitorSpec   `json:"spec,omitempty"`
+	Status SecretMonitorStatus `json:"status,omitempty"`
+}
+
+//+kubebuilder:object:root=true
+
+// SecretMonitorList contains a list of SecretMonitor
+type SecretMonitorList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []SecretMonitor `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&SecretMonitor{}, &SecretMonitorList{})
+}
+✅ This defines:
+
+A SecretMonitor CRD with Namespace (which secrets to monitor).
+A Status field to store the number of secrets found.
+5. Implement Controller Logic (secretmonitor_controller.go)
+Modify controllers/secretmonitor_controller.go to watch secrets and delete expired ones.
+
+go
+Copy
+Edit
+package controllers
+
+import (
+	"context"
+	"fmt"
+
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	monitoringv1alpha1 "mycompany.com/monitoring-secrets-operator/api/v1alpha1"
+)
+
+// SecretMonitorReconciler reconciles a SecretMonitor object
+type SecretMonitorReconciler struct {
+	client.Client
+}
+
+//+kubebuilder:rbac:groups=security.mycompany.com,resources=secretmonitors,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;delete
+
+func (r *SecretMonitorReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Get the SecretMonitor instance
+	monitor := &monitoringv1alpha1.SecretMonitor{}
+	err := r.Get(ctx, req.NamespacedName, monitor)
+	if err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// List all secrets in the specified namespace
+	secretList := &v1.SecretList{}
+	listOpts := &client.ListOptions{Namespace: monitor.Spec.Namespace}
+	err = r.List(ctx, secretList, listOpts)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	log.Info(fmt.Sprintf("Found %d secrets in namespace %s", len(secretList.Items), monitor.Spec.Namespace))
+
+	// Delete secrets that contain the annotation "monitoring.mycompany.com/remove=true"
+	for _, secret := range secretList.Items {
+		if val, exists := secret.Annotations["monitoring.mycompany.com/remove"]; exists && val == "true" {
+			log.Info(fmt.Sprintf("Deleting secret: %s", secret.Name))
+			err = r.Delete(ctx, &secret)
+			if err != nil {
+				log.Error(err, "Failed to delete secret")
+			}
+		}
+	}
+
+	// Update SecretMonitor status
+	monitor.Status.TotalSecrets = len(secretList.Items)
+	err = r.Status().Update(ctx, monitor)
+	if err != nil {
+		log.Error(err, "Failed to update status")
+	}
+
+	return reconcile.Result{}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *SecretMonitorReconciler) SetupWithManager(mgr controller.Manager) error {
+	return controller.NewControllerManagedBy(mgr).
+		For(&monitoringv1alpha1.SecretMonitor{}).
+		Complete(r)
+}
+✅ Controller Behavior:
+
+Watches SecretMonitor CRD changes.
+Lists all secrets in the specified namespace.
+Deletes secrets with the annotation "monitoring.mycompany.com/remove=true".
+Updates the SecretMonitor status with the number of secrets found.
+6. Generate & Apply Manifests
+Generate manifests:
+
+sh
+Copy
+Edit
+make manifests
+make generate
+Apply CRDs to Kubernetes:
+
+sh
+Copy
+Edit
+make install
+7. Deploy and Test
+Run the operator locally:
+
+sh
+Copy
+Edit
+make run
+Apply a SecretMonitor instance:
+
+yaml
+Copy
+Edit
+apiVersion: security.mycompany.com/v1alpha1
+kind: SecretMonitor
+metadata:
+  name: example-monitor
+spec:
+  namespace: default
+sh
+Copy
+Edit
+kubectl apply -f secretmonitor.yaml
+Create a test secret:
+
+yaml
+Copy
+Edit
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sensitive-data
+  namespace: default
+  annotations:
+    monitoring.mycompany.com/remove: "true"
+type: Opaque
+data:
+  password: cGFzc3dvcmQ=  # "password" in base64
+sh
+Copy
+Edit
+kubectl apply -f secret.yaml
+✅ The operator should detect and delete the secret.
+
+8. Deploy Operator in Kubernetes
+Build and push the image:
+
+sh
+Copy
+Edit
+make docker-build IMG=mycompany/monitoring-secrets-operator:v1
+make docker-push IMG=mycompany/monitoring-secrets-operator:v1
+Deploy it:
+
+sh
+Copy
+Edit
+make deploy IMG=mycompany/monitoring-secrets-operator:v1
+
+
+
+
+
+-----
+
+
+
+# Steps to Create a Kubebuilder Project for Secret Monitoring
+1. Install Prerequisites
+```
+curl -L -o kubebuilder https://go.kubebuilder.io/dl/latest/linux/amd64
+chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+```
+# Initialize the Kubebuilder Project
+Create a new Kubebuilder project named "monitoring-secrets-operator":
+
+```
+mkdir monitoring-secrets-operator && cd monitoring-secrets-operator
+kubebuilder init --domain mycompany.com --repo mycompany.com/monitoring-secrets-operator
+
+#kubebuilder init --plugins go/v4 --domain example.org --owner "secretsync"
+
+```
+
+main.go → Entry point of the operator
+config/ → Kubernetes manifests
+controllers/ → Business logic (custom controller)
+api/ → Custom Resource Definition (CRD)
+
+# Create a Custom Resource Definition (CRD)
+You need a CRD to define how you will configure secret monitoring.
+
+```
+kubebuilder create api --group security --version v1alpha1 --kind SecretMonitor
+kubebuilder create api --group=core --version=v1 --kind=Secret --namespaced=false
+```
+
+api/v1alpha1/secretmonitor_types.go (CRD Schema)
+controllers/secretmonitor_controller.go (Controller logic)
+
+# Kubernetes & Podman Setup Guide
+
+This guide provides step-by-step instructions on how to build, push, and deploy a containerized application using **Podman** and **Kubernetes**, along with managing **secrets**.
+
+---
+
+# Setting Up a Local Container Registry
+Start a Podman container registry:
+```sh
+podman run -d -p 5000:5000 --restart=always --name registry registry:2
+
+curl -X GET http://localhost:5000/v2/_catalog
+```
+
+# Building & Tagging the Image
+
+```
+podman build -t myrepo/password-app:1 . # main.go and Dockerfile in directory application
+
+podman build -t my-image .
+podman images
+
+podman run -p 8080:8080 localhost/my-image:latest    #for test without -d
+
+podman run -d -p 8080:8080 --name password-app myrepo/password-app:1
+
+podman tag localhost/my-image:latest localhost:5000/my-image:v1
+
+podman push localhost:5000/my-image:v1
+
+podman push localhost:5000/my-image:v2
+podman build -t localhost:5000/my-image:v2 .
+
+```
+# Configuring Kubernetes Deployment
+
+```
+kubectl apply -f deployment.yaml  # yaml file in directory kubernetes-files
+
+kubectl get all
+
+kubectl get pods -l app=my-app
+
+kubectl logs -f $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}')
+
+sudo make run # in root directory
+
+ls                                                               
+api/          bin/  config/     go.mod  hack/      kubernetes-files/  PROJECT    test/
+application/  cmd/  Dockerfile  go.sum  internal/  Makefile           README.md
+```
+# After execute in terminal we see this info
+```
+2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"cilium-ca","namespace":"kube-system"}, "namespace": "kube-system", "name": "cilium-ca", "reconcileID": "b5d21669-5dfb-4e22-bf80-6b159cdd7fe9", "Secret": "cilium-ca", "Namespace": "kube-system"}
+2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"sh.helm.release.v1.cilium.v4","namespace":"kube-system"}, "namespace": "kube-system", "name": "sh.helm.release.v1.cilium.v4", "reconcileID": "9c4ea236-541c-4e5a-8142-5d4c4e334ffc", "Secret": "sh.helm.release.v1.cilium.v4", "Namespace": "kube-system"}
+2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"alertmanager-prometheus-operator-kube-p-alertmanager-tls-assets-0","namespace":"prometheus"}, "namespace": "prometheus", "name": "alertmanager-prometheus-operator-kube-p-alertmanager-tls-assets-0", "reconcileID": "ab5e51c5-d0b2-4cc9-8133-ef06ab3e3578", "Secret": "alertmanager-prometheus-operator-kube-p-alertmanager-tls-assets-0", "Namespace": "prometheus"}
+2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a", "Secret": "prometheus-operator-kube-p-admission", "Namespace": "prometheus"}
+2025-02-24T17:17:46+01:00	INFO	🔄 Deployment uses updated Secret	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a", "Deployment": "prometheus-operator-kube-p-operator"}
+2025-02-24T17:17:46+01:00	INFO	🔄 Found 1 Pods for Deployment prometheus-operator-kube-p-operator	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a"}
+2025-02-24T17:17:46+01:00	INFO	✅ Pod is ready	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a", "Pod": "prometheus-operator-kube-p-operator-78b875fd67-jfc64", "Deployment": "prometheus-operator-kube-p-operator"}
+2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-prometheus-operator-kube-p-prometheus-web-config","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-prometheus-operator-kube-p-prometheus-web-config", "reconcileID": "1a90aae4-01b5-4d0c-9bee-f7092acdcd7a", "Secret": "prometheus-prometheus-operator-kube-p-prometheus-web-config", "Namespace": "prometheus"}
+
+```
+# Working with Kubernetes Secrets
+
+```
+echo -n 'your-password' | base64
+kubectl create secret generic my-app-secret --from-literal=password='your-password'
+
+kubectl get secret my-app-secret -o jsonpath='{.data.password}' | base64 --decode
+
+kubectl patch secret my-app-secret -n default --type='json' -p='[{"op": "replace", "path": "/data/password", "value": "eW91ci1wYXNzd29yZA=="}]'
+
+kubectl get secret my-app-secret -o jsonpath='{.data.password}' | base64 --decode
+
+kubectl exec -it $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}') -- cat /etc/secret-volume/password
+
+```
+# Managing Deployments
+
+```
+kubectl get deployment my-app-deployment
+
+kubectl scale deployment my-app-deployment --replicas=3
+
+kubectl rollout restart deployment my-app-deployment
+
+kubectl get pods --selector=app=my-app -o wide
+
+```
+# Debugging Tips
+
+```
+kubectl exec -it $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}') -- ls -l /etc/secret-volume
+
+kubectl logs -f $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}')
+
+kubectl describe pod $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}')
+```
+---
+
+
+###  Add the Prometheus Helm Repository
+
+```sh
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+kubectl create namespace prometheus
+helm install prometheus-operator prometheus-community/kube-prometheus-stack -n prometheus
+kubectl port-forward -n prometheus svc/prometheus-operator-grafana 3000:80
+kubectl get secret -n prometheus prometheus-operator-grafana -o jsonpath="{.data.admin-password}" | base64 --decode
+Username: admin
+
+kubectl port-forward -n prometheus svc/prometheus-operator-kube-p-prometheus 9090:9090
+
+kubectl port-forward -n prometheus svc/prometheus-operator-kube-p-alertmanager 9093:9093
+
+kubectl port-forward -n prometheus svc/prometheus-operator-prometheus-node-exporter 9100:9100
+```
+# Running Multiple Port Forwards at Once
+
+```
+kubectl port-forward -n prometheus svc/prometheus-operator-grafana 3000:80 &
+kubectl port-forward -n prometheus svc/prometheus-operator-kube-p-prometheus 9090:9090 &
+kubectl port-forward -n prometheus svc/prometheus-operator-kube-p-alertmanager 9093:9093 &
+```
+netstat -tulnp | grep LISTEN
+
+----
+
+
+
+
+# Custom Resource Definition (CRD) Management for Secrets Operator
+
+This guide explains how to verify, delete, reapply, and use a **Custom Resource Definition (CRD)** for managing Kubernetes secrets.
+
+
+
+## Step 1: Verify Existing CRD
+
+
+Before applying a new CRD, check if the old CRD is already installed:
+```sh
+kubectl get crds  secrets.core.mycompany.com
+
+sudo kubectl get crds | grep managedsecrets.core.mycompany.com
+
+#If it exists, delete it to prevent conflicts.
+
+kubectl delete crd secrets.core.mycompany.com
+
+```
+# Apply the New CRD
+
+```
+kubectl apply -f your_crd_file.yaml
+
+
+kubectl get crds 
+secrets.core.mycompany.com       YYYY-MM-DDTHH:MM:SSZ
+
+managedsecrets.core.mycompany.com            2025-02-24T15:31:03Z
+
+```
+# Creating and Managing Custom Resources
+Once the CRD is applied, you can create custom resources using YAML. Create a Custom Secret Resource
+Example my-secret.yaml:
+```
+yaml
+Copy
+Edit
+apiVersion: core.mycompany.com/v1
+kind: ManagedSecret
+metadata:
+  name: my-custom-secret
+spec:
+  secretName: my-app-secret
+  data:
+    username: admin
+    password: supersecurepassword
+  labels:
+    environment: production
+
+```
+Apply it using:
+
+kubectl apply -f my-secret.yaml
+
+# Verify Custom Resources
+To check if your ManagedSecrets are correctly created:
+
+
+kubectl get managedsecrets or using the short name:
+```
+kubectl get msec
+
+NAME               AGE
+my-custom-secret   2m
+To describe a specific secret:
+
+kubectl describe managedsecret my-custom-secret
+kubectl delete managedsecret my-custom-secret
+
+sudo kubectl apply -f core.mycompany.com_secrets.yaml
+sudo kubectl delete -f core.mycompany.com_secrets.yaml
+```
+
+
+The error indicates that the ServiceMonitor resource is not recognized in your cluster, which means the Prometheus Operator CRDs are not installed. ServiceMonitor is a custom resource provided by the Prometheus Operator, and your cluster must have the Prometheus Operator CRDs installed before you apply monitor.yaml.
+
+Check if the ServiceMonitor CRD is Installed
+
+```
+kubectl get crds | grep servicemonitors
+```
+
+servicemonitors.monitoring.coreos.com   2023-10-12T12:34:56Z
+
+# Install Prometheus Operator
+If the CRD is missing, install the Prometheus Operator, which provides the ServiceMonitor resource. You can do this in multiple ways:
+
+Option 1: Install Prometheus Operator Using Helm (Recommended)
+If you are using Helm, install the Prometheus Operator like this:
+
+sh
+Copy
+Edit
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install prometheus-operator prometheus-community/kube-prometheus-stack
+This installs:
+
+Prometheus
+Alertmanager
+Grafana
+The Prometheus Operator, which includes the ServiceMonitor CRD.
+After this, verify that the CRD exists by running:
+
+sh
+Copy
+Edit
+kubectl get crds | grep servicemonitors
+If you see an output, proceed to Step 3.
+
+Option 2: Manually Install the Prometheus Operator
+If you are not using Helm, you can manually apply the Prometheus Operator manifests:
+
+sh
+Copy
+Edit
+kubectl apply -f https://github.com/prometheus-operator/prometheus-operator/releases/latest/download/bundle.yaml
+This will install the Prometheus Operator and register the necessary CRDs.
+
+Step 3: Retry Applying monitor.yaml
+Once the CRD is available, you can now apply your monitor.yaml file:
+
+sh
+Copy
+Edit
+kubectl apply -f monitor.yaml
+If everything is correctly set up, it should successfully create the ServiceMonitor resource.
+
+Step 4: Verify the ServiceMonitor
+Check if the ServiceMonitor was created successfully:
+
+sh
+Copy
+Edit
+kubectl get servicemonitor -n system
+If you see your controller-manager-metrics-monitor, then it is now active.
+
+Next Steps
+Ensure Prometheus is correctly scraping the /metrics endpoint.
+
+Check Prometheus logs if the service is being monitored.
+
+You can check logs using:
+
+
+kubectl logs -l app=prometheus -n monitoring
+
+
+--------------
+ How to Configure it Properly
+1️⃣ Ensure Webhook Service Exists
+Your CRD's spec.conversion.webhook.clientConfig references a Service for the webhook.
+👉 Confirm you have a Service defined for your webhook (e.g., monitoring-secrets-webhook).
+
+Example Service:
+
+yaml
+Copy
+Edit
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-secrets-webhook
+  namespace: monitoring
+spec:
+  selector:
+    app: monitoring-secrets-webhook
+  ports:
+    - protocol: TCP
+      port: 443
+      targetPort: 8443
+2️⃣ Ensure Your CRD References a Webhook
+Modify your CRD (bases/core.mycompany.com_secrets.yaml) to include a webhook conversion config.
+
+Example:
+
+yaml
+Copy
+Edit
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: secrets.core.mycompany.com
+spec:
+  group: core.mycompany.com
+  names:
+    kind: Secret
+    plural: secrets
+  scope: Namespaced
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: monitoring-secrets-webhook  # Kustomize will substitute this
+          namespace: monitoring             # Kustomize will substitute this
+          path: /convert
+        caBundle: Cg==
+3️⃣ Ensure kustomization.yaml Uses kustomizeconfig.yaml
+Your kustomization.yaml should declare the webhook CRD and the config file.
+
+Example:
+
+yaml
+Copy
+Edit
+resources:
+  - bases/core.mycompany.com_secrets.yaml  # Your CRD file
+
+patches:
+  # Uncomment if you're enabling webhooks
+  - path: webhook_patch.yaml
+
+configurations:
+  - kustomizeconfig.yaml
+4️⃣ Apply the Configuration
+Once you've configured everything, apply it:
+
+sh
+Copy
+Edit
+kubectl apply -k .
+Then verify:
+
+sh
+Copy
+Edit
+kubectl get crds secrets.core.mycompany.com -o yaml
+✅ Summary
+Your kustomizeconfig.yaml ensures Kustomize automatically substitutes the correct service name and namespace in your CRD webhook configuration.
+Your CRD must reference a webhook service.
+Your kustomization.yaml must include kustomizeconfig.yaml for it to take effect.
+
