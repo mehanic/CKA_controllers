@@ -1,31 +1,35 @@
-# The primary purpose of this controller (SecretReconciler) is to manage and monitor changes to Secret resources in a Kubernetes cluster, particularly when the secret data (like passwords or tokens) is updated. 
-### The controller is designed to reconcile Secret changes by:
-### Watching for updates to Secret resources.
-### Hashing and comparing secret data to detect changes.
-### Identifying deployments using the secret and checking the readiness of the associated pods.
-### Exposing Prometheus metrics for tracking the controller's reconcile operations.
-### This provides an automated way to monitor and respond to changes in sensitive data (such as passwords) in Kubernetes while ensuring the associated workloads (like deployments and pods) are kept in sync with the updates.
+### The primary purpose of this controller (SecretReconciler) is to manage and monitor changes to Secret resources in a Kubernetes cluster, particularly when the secret data (like passwords or tokens) is updated. 
+The controller is designed to reconcile Secret changes by:
 
-## Key Functionality of the Controller - Watch for Secret Changes: The controller watches for changes to Secret resources in the cluster, specifically detecting when a Secret is created, updated, or deleted.
+Watching for updates to Secret resources.
 
-## When a Secret is updated, the Reconcile method is triggered. It checks if the secret has been modified and logs any changes. It compares the old and new versions of the Secret data to detect any differences in the data (e.g., a password or token change).
+Hashing and comparing secret data to detect changes.
 
-## Instead of logging raw secret values, which could be sensitive, the controller hashes the secret values (using SHA-256) and compares the hashes to check for changes. This ensures sensitive data (such as passwords) is never exposed in logs.
+Identifying deployments using the secret and checking the readiness of the associated pods.
 
-## The controller checks if the updated secret is being used by any Deployment in the same namespace. It does this by inspecting the Volumes in the Deployment spec to see if the secret is mounted as a volume.
+Exposing Prometheus metrics for tracking the controller's reconcile operations.
 
-## Once it finds that a Deployment uses the updated secret, the controller proceeds to identify the associated Pods for that Deployment. It then checks the readiness of those pods to ensure that they are running and all containers are ready. If the pods are ready, it logs a success message; if not, it logs the status and checks their readiness state.
+This provides an automated way to monitor and respond to changes in sensitive data (such as passwords) in Kubernetes while ensuring the associated workloads (like deployments and pods) are kept in sync with the updates.
 
-## The controller exposes custom Prometheus metrics. It increments a reconciles_total counter every time a reconcile occurs, with the status labels indicating whether the reconcile was successful or failed. This allows Prometheus to track how many reconciles were performed and monitor their outcomes.
+Key Functionality of the Controller - Watch for Secret Changes: The controller watches for changes to Secret resources in the cluster, specifically detecting when a Secret is created, updated, or deleted.
 
-## The controller serves a /metrics endpoint on port 8080 to expose the Prometheus metrics. This allows Prometheus to scrape the metrics and track the performance of the controller, particularly in terms of reconcile success and failure rates.
+When a Secret is updated, the Reconcile method is triggered. It checks if the secret has been modified and logs any changes. It compares the old and new versions of the Secret data to detect any differences in the data (e.g., a password or token change).
 
-## If the controller encounters any issues (e.g., failure to fetch a Secret, failure to list Deployments, or failure to list Pods), it logs the error and increments the failure counter in the Prometheus metrics.
+Instead of logging raw secret values, which could be sensitive, the controller hashes the secret values (using SHA-256) and compares the hashes to check for changes. This ensures sensitive data (such as passwords) is never exposed in logs.
 
-## The controller detects the update, compares the old and new versions of the secret, and if any changes are detected (based on the hash comparison), it checks if the secret is used in any deployments.
+The controller checks if the updated secret is being used by any Deployment in the same namespace. It does this by inspecting the Volumes in the Deployment spec to see if the secret is mounted as a volume.
 
+Once it finds that a Deployment uses the updated secret, the controller proceeds to identify the associated Pods for that Deployment. It then checks the readiness of those pods to ensure that they are running and all containers are ready. If the pods are ready, it logs a success message; if not, it logs the status and checks their readiness state.
 
-## For each Deployment using the secret, the controller checks the associated Pods and their readiness. If the pods are ready, it logs that they are ready; otherwise, it logs their readiness state. The controller tracks its reconcile operations, recording both success and failure outcomes. These metrics are exposed to Prometheus for monitoring. A counter metric that tracks the total number of reconciles performed by the controller, with labels for success (success) or failure (failure).The metrics are exposed on the /metrics endpoint on port 8080, making them available for Prometheus to scrape.
+The controller exposes custom Prometheus metrics. It increments a reconciles_total counter every time a reconcile occurs, with the status labels indicating whether the reconcile was successful or failed. This allows Prometheus to track how many reconciles were performed and monitor their outcomes.
+
+The controller serves a /metrics endpoint on port 8080 to expose the Prometheus metrics. This allows Prometheus to scrape the metrics and track the performance of the controller, particularly in terms of reconcile success and failure rates.
+
+If the controller encounters any issues (e.g., failure to fetch a Secret, failure to list Deployments, or failure to list Pods), it logs the error and increments the failure counter in the Prometheus metrics.
+
+The controller detects the update, compares the old and new versions of the secret, and if any changes are detected (based on the hash comparison), it checks if the secret is used in any deployments.
+
+For each Deployment using the secret, the controller checks the associated Pods and their readiness. If the pods are ready, it logs that they are ready; otherwise, it logs their readiness state. The controller tracks its reconcile operations, recording both success and failure outcomes. These metrics are exposed to Prometheus for monitoring. A counter metric that tracks the total number of reconciles performed by the controller, with labels for success (success) or failure (failure).The metrics are exposed on the /metrics endpoint on port 8080, making them available for Prometheus to scrape.
 
 
 
