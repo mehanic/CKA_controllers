@@ -1,34 +1,34 @@
-# The primary purpose of this controller (SecretReconciler) is to manage and monitor changes to Secret resources in a Kubernetes cluster, particularly when the secret data (like passwords or tokens) is updated. Here's a breakdown of the key components and the controller's functionality:
+# The primary purpose of this controller (SecretReconciler) is to manage and monitor changes to Secret resources in a Kubernetes cluster, particularly when the secret data (like passwords or tokens) is updated. 
+### The controller is designed to reconcile Secret changes by:
+### Watching for updates to Secret resources.
+### Hashing and comparing secret data to detect changes.
+### Identifying deployments using the secret and checking the readiness of the associated pods.
+### Exposing Prometheus metrics for tracking the controller's reconcile operations.
+### This provides an automated way to monitor and respond to changes in sensitive data (such as passwords) in Kubernetes while ensuring the associated workloads (like deployments and pods) are kept in sync with the updates.
 
-# Key Functionality of the Controller - Watch for Secret Changes: The controller watches for changes to Secret resources in the cluster, specifically detecting when a Secret is created, updated, or deleted.
+## Key Functionality of the Controller - Watch for Secret Changes: The controller watches for changes to Secret resources in the cluster, specifically detecting when a Secret is created, updated, or deleted.
 
-# When a Secret is updated, the Reconcile method is triggered. It checks if the secret has been modified and logs any changes. It compares the old and new versions of the Secret data to detect any differences in the data (e.g., a password or token change).
+## When a Secret is updated, the Reconcile method is triggered. It checks if the secret has been modified and logs any changes. It compares the old and new versions of the Secret data to detect any differences in the data (e.g., a password or token change).
 
-# Instead of logging raw secret values, which could be sensitive, the controller hashes the secret values (using SHA-256) and compares the hashes to check for changes. This ensures sensitive data (such as passwords) is never exposed in logs.
+## Instead of logging raw secret values, which could be sensitive, the controller hashes the secret values (using SHA-256) and compares the hashes to check for changes. This ensures sensitive data (such as passwords) is never exposed in logs.
 
-# The controller checks if the updated secret is being used by any Deployment in the same namespace. It does this by inspecting the Volumes in the Deployment spec to see if the secret is mounted as a volume.
+## The controller checks if the updated secret is being used by any Deployment in the same namespace. It does this by inspecting the Volumes in the Deployment spec to see if the secret is mounted as a volume.
 
-# Once it finds that a Deployment uses the updated secret, the controller proceeds to identify the associated Pods for that Deployment. It then checks the readiness of those pods to ensure that they are running and all containers are ready. If the pods are ready, it logs a success message; if not, it logs the status and checks their readiness state.
+## Once it finds that a Deployment uses the updated secret, the controller proceeds to identify the associated Pods for that Deployment. It then checks the readiness of those pods to ensure that they are running and all containers are ready. If the pods are ready, it logs a success message; if not, it logs the status and checks their readiness state.
 
-# The controller exposes custom Prometheus metrics. It increments a reconciles_total counter every time a reconcile occurs, with the status labels indicating whether the reconcile was successful or failed. This allows Prometheus to track how many reconciles were performed and monitor their outcomes.
+## The controller exposes custom Prometheus metrics. It increments a reconciles_total counter every time a reconcile occurs, with the status labels indicating whether the reconcile was successful or failed. This allows Prometheus to track how many reconciles were performed and monitor their outcomes.
 
-# The controller serves a /metrics endpoint on port 8080 to expose the Prometheus metrics. This allows Prometheus to scrape the metrics and track the performance of the controller, particularly in terms of reconcile success and failure rates.
+## The controller serves a /metrics endpoint on port 8080 to expose the Prometheus metrics. This allows Prometheus to scrape the metrics and track the performance of the controller, particularly in terms of reconcile success and failure rates.
 
-# If the controller encounters any issues (e.g., failure to fetch a Secret, failure to list Deployments, or failure to list Pods), it logs the error and increments the failure counter in the Prometheus metrics.
+## If the controller encounters any issues (e.g., failure to fetch a Secret, failure to list Deployments, or failure to list Pods), it logs the error and increments the failure counter in the Prometheus metrics.
 
-# The controller detects the update, compares the old and new versions of the secret, and if any changes are detected (based on the hash comparison), it checks if the secret is used in any deployments.
-
-
-# For each Deployment using the secret, the controller checks the associated Pods and their readiness. If the pods are ready, it logs that they are ready; otherwise, it logs their readiness state. The controller tracks its reconcile operations, recording both success and failure outcomes. These metrics are exposed to Prometheus for monitoring. A counter metric that tracks the total number of reconciles performed by the controller, with labels for success (success) or failure (failure).The metrics are exposed on the /metrics endpoint on port 8080, making them available for Prometheus to scrape.
+## The controller detects the update, compares the old and new versions of the secret, and if any changes are detected (based on the hash comparison), it checks if the secret is used in any deployments.
 
 
-Summary:
-The controller is designed to reconcile Secret changes by:
-Watching for updates to Secret resources.
-Hashing and comparing secret data to detect changes.
-Identifying deployments using the secret and checking the readiness of the associated pods.
-Exposing Prometheus metrics for tracking the controller's reconcile operations.
-This provides an automated way to monitor and respond to changes in sensitive data (such as passwords) in Kubernetes while ensuring the associated workloads (like deployments and pods) are kept in sync with the updates.
+## For each Deployment using the secret, the controller checks the associated Pods and their readiness. If the pods are ready, it logs that they are ready; otherwise, it logs their readiness state. The controller tracks its reconcile operations, recording both success and failure outcomes. These metrics are exposed to Prometheus for monitoring. A counter metric that tracks the total number of reconciles performed by the controller, with labels for success (success) or failure (failure).The metrics are exposed on the /metrics endpoint on port 8080, making them available for Prometheus to scrape.
+
+
+
 
 
 
@@ -176,6 +176,9 @@ ls
 api/          bin/  config/     go.mod  hack/      kubernetes-files/  PROJECT    test/
 application/  cmd/  Dockerfile  go.sum  internal/  Makefile           README.md
 ```
+
+# Main logic is wiriting with golang in  internal/controller/secret_controller.go and then added some paramethers which responsible for some features in cmd/main.go 
+
 # After execute in terminal we see this info
 ```
 2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"cilium-ca","namespace":"kube-system"}, "namespace": "kube-system", "name": "cilium-ca", "reconcileID": "b5d21669-5dfb-4e22-bf80-6b159cdd7fe9", "Secret": "cilium-ca", "Namespace": "kube-system"}
@@ -186,6 +189,15 @@ application/  cmd/  Dockerfile  go.sum  internal/  Makefile           README.md
 2025-02-24T17:17:46+01:00	INFO	🔄 Found 1 Pods for Deployment prometheus-operator-kube-p-operator	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a"}
 2025-02-24T17:17:46+01:00	INFO	✅ Pod is ready	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "87930ec4-57ee-4ae1-a702-5815c156032a", "Pod": "prometheus-operator-kube-p-operator-78b875fd67-jfc64", "Deployment": "prometheus-operator-kube-p-operator"}
 2025-02-24T17:17:46+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-prometheus-operator-kube-p-prometheus-web-config","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-prometheus-operator-kube-p-prometheus-web-config", "reconcileID": "1a90aae4-01b5-4d0c-9bee-f7092acdcd7a", "Secret": "prometheus-prometheus-operator-kube-p-prometheus-web-config", "Namespace": "prometheus"}
+
+
+2025-02-25T19:38:05+01:00	INFO	✅ Pod is ready	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"prometheus"}, "namespace": "prometheus", "name": "prometheus-operator-kube-p-admission", "reconcileID": "2827694a-050e-4b78-ae0c-a5e37e966d79", "Pod": "prometheus-operator-kube-p-operator-78b875fd67-jfc64", "Deployment": "prometheus-operator-kube-p-operator"}
+2025-02-25T19:38:05+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"my-app-secret","namespace":"default"}, "namespace": "default", "name": "my-app-secret", "reconcileID": "5789e9b5-61be-45ca-9b05-9f4cea7aa32c", "Secret": "my-app-secret", "Namespace": "default"}
+2025-02-25T19:38:05+01:00	INFO	🔄 Deployment uses updated Secret	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"my-app-secret","namespace":"default"}, "namespace": "default", "name": "my-app-secret", "reconcileID": "5789e9b5-61be-45ca-9b05-9f4cea7aa32c", "Deployment": "my-app-deployment"}
+2025-02-25T19:38:05+01:00	INFO	🔄 Found 1 Pods for Deployment my-app-deployment	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"my-app-secret","namespace":"default"}, "namespace": "default", "name": "my-app-secret", "reconcileID": "5789e9b5-61be-45ca-9b05-9f4cea7aa32c"}
+2025-02-25T19:38:05+01:00	INFO	✅ Pod is ready	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"my-app-secret","namespace":"default"}, "namespace": "default", "name": "my-app-secret", "reconcileID": "5789e9b5-61be-45ca-9b05-9f4cea7aa32c", "Pod": "my-app-deployment-85bcc75bbc-mzbrb", "Deployment": "my-app-deployment"}
+2025-02-25T19:38:05+01:00	INFO	🔑 Secret detected	{"controller": "secret", "controllerGroup": "", "controllerKind": "Secret", "Secret": {"name":"prometheus-operator-kube-p-admission","namespace":"default"}, "namespace": "default", "name": "prometheus-operator-kube-p-admission", "reconcileID": "9d5470fd-7895-4abe-95ae-b9186cb967b9", "Secret": "prometheus-operator-kube-p-admission", "Namespace": "default"}
+
 
 ```
 # Working with Kubernetes Secrets
@@ -660,32 +672,24 @@ Example:
 resources:
   - bases/core.mycompany.com_secrets.yaml  # Your CRD file
 
-patches:
-  # Uncomment if you're enabling webhooks
+# patches:(not finish)
+
+Uncomment if you're enabling webhooks
   - path: webhook_patch.yaml
 
 configurations:
   - kustomizeconfig.yaml
-4️⃣ Apply the Configuration
+Apply the Configuration
 Once you've configured everything, apply it:
 
-sh
-Copy
-Edit
 kubectl apply -k .
 Then verify:
 
-sh
-Copy
-Edit
-kubectl get crds secrets.core.mycompany.com -o yaml
-✅ Summary
-Your kustomizeconfig.yaml ensures Kustomize automatically substitutes the correct service name and namespace in your CRD webhook configuration.
-Your CRD must reference a webhook service.
-Your kustomization.yaml must include kustomizeconfig.yaml for it to take effect.
 
 
-# In Kubebuilder, you should apply monitor.yaml after deploying the CRDs and before running the controller. Here’s the correct sequence:
+
+
+## In Kubebuilder, you should apply monitor.yaml after deploying the CRDs and before running the controller. Here’s the correct sequence:
 
 1️⃣ Setup Your Controller and CRDs
 Before applying the ServiceMonitor (monitor.yaml), you need to ensure that:
@@ -694,53 +698,44 @@ The Custom Resource Definitions (CRDs) are installed.
 The controller is deployed and running, exposing metrics.
 Step-by-Step Order:
 Generate CRDs (if not already created):
-sh
-Copy
-Edit
+
 make manifests
 Apply CRDs to the cluster:
-sh
-Copy
-Edit
+
+
 kubectl apply -f config/crd/bases/
 Deploy the Controller:
 If running locally:
-sh
-Copy
-Edit
+
 make run
 If deploying via Kubernetes:
-sh
-Copy
-Edit
+
 make docker-build docker-push IMG=<your_image>
 make deploy IMG=<your_image>
-2️⃣ Apply monitor.yaml
+ Apply monitor.yaml
 Now that the controller is running and exposing metrics, apply your ServiceMonitor:
 
-sh
-Copy
-Edit
+
 kubectl apply -f monitor.yaml
-3️⃣ Verify That Metrics Are Being Scraped
+3Verify That Metrics Are Being Scraped
 Check if ServiceMonitor is applied correctly:
-sh
-Copy
-Edit
+
 kubectl get servicemonitor -A
 Check if Prometheus is discovering the controller metrics:
-sh
-Copy
-Edit
+
 kubectl get servicemonitors -n <prometheus-namespace>
 Check logs if metrics are not being scraped:
-sh
-Copy
-Edit
+
 kubectl logs -n <namespace> <prometheus-pod-name>
+
 Summary:
+
 ✔ Apply CRDs first
+
 ✔ Deploy Controller next
-✔ Apply monitor.yaml after controller is running
+
+✔ Apply monitor.yaml 
+after controller is running
+
 ✔ Verify metrics in Prometheus
 
